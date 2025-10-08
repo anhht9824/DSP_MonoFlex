@@ -344,4 +344,16 @@ _C.SEED = -1
 _C.CUDNN_BENCHMARK = True
 _C.START_TIME = 0
 
+# ---------------------------------------------------------------------------- #
+# Weights & Biases (wandb) configuration
+# ---------------------------------------------------------------------------- #
+_C.WANDB = CN()
+_C.WANDB.ENABLED = False
+_C.WANDB.PROJECT = "monoflex"
+_C.WANDB.ENTITY = ""
+_C.WANDB.NAME = ""
+_C.WANDB.TAGS = []
+_C.WANDB.NOTES = ""
+_C.WANDB.LOG_INTERVAL = 10
+
 _C.PATHS_CATALOG = os.path.join(os.path.dirname(__file__), "paths_catalog.py")

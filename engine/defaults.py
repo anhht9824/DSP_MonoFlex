@@ -44,6 +44,14 @@ def default_argument_parser():
         "--machine-rank", type=int, default=0, help="the rank of this machine (unique per machine)"
     )
 
+    # Weights & Biases arguments
+    parser.add_argument("--wandb", action="store_true", help="enable Weights & Biases logging")
+    parser.add_argument("--wandb-project", type=str, default="monoflex", help="wandb project name")
+    parser.add_argument("--wandb-entity", type=str, default="", help="wandb entity/team name")
+    parser.add_argument("--wandb-name", type=str, default="", help="wandb run name")
+    parser.add_argument("--wandb-tags", type=str, nargs="*", default=[], help="wandb tags")
+    parser.add_argument("--wandb-notes", type=str, default="", help="wandb run notes")
+
     # PyTorch still may leave orphan processes in multi-gpu training.
     # Therefore we use a deterministic way to obtain port,
     # so that users are aware of orphan processes by seeing the port occupied.

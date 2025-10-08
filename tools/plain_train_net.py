@@ -26,6 +26,13 @@ from model.detector import KeypointDetector
 from data import build_test_loader
 import resource
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("Warning: wandb is not installed. Install it with 'pip install wandb' to use Weights & Biases logging.")
+
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 
@@ -34,6 +41,32 @@ torch.backends.cudnn.enabled = True # enable cudnn and uncertainty imported
 torch.backends.cudnn.benchmark = True # enable cudnn to search the best algorithm
 
 def train(cfg, model, device, distributed):
+    # Initialize wandb if enabled
+    if cfg.WANDB.ENABLED and WANDB_AVAILABLE and comm.get_rank() == 0:
+        wandb_config = {
+            "learning_rate": cfg.SOLVER.BASE_LR,
+            "batch_size": cfg.SOLVER.IMS_PER_BATCH,
+            "max_iterations": cfg.SOLVER.MAX_ITERATION,
+            "architecture": "MonoFlex",
+            "dataset": "KITTI",
+            "optimizer": "SGD",  # assuming SGD, can be updated based on actual optimizer
+            "input_height": cfg.INPUT.HEIGHT_TRAIN,
+            "input_width": cfg.INPUT.WIDTH_TRAIN,
+        }
+        
+        wandb.init(
+            project=cfg.WANDB.PROJECT,
+            entity=cfg.WANDB.ENTITY if cfg.WANDB.ENTITY else None,
+            name=cfg.WANDB.NAME if cfg.WANDB.NAME else None,
+            tags=cfg.WANDB.TAGS if cfg.WANDB.TAGS else None,
+            notes=cfg.WANDB.NOTES if cfg.WANDB.NOTES else None,
+            config=wandb_config,
+            dir=cfg.OUTPUT_DIR,
+        )
+        
+        # Log model architecture
+        wandb.watch(model, log='all', log_freq=100)
+
     data_loader = make_data_loader(cfg, is_train=True)
     data_loaders_val = build_test_loader(cfg, is_train=False)
 
@@ -101,6 +134,20 @@ def setup(args):
     if args.test:
         cfg.DATASETS.TEST_SPLIT = 'test'
         cfg.DATASETS.TEST = ("kitti_test",)
+
+    # Setup wandb configuration
+    if hasattr(args, 'wandb') and args.wandb:
+        cfg.WANDB.ENABLED = True
+        if args.wandb_project:
+            cfg.WANDB.PROJECT = args.wandb_project
+        if args.wandb_entity:
+            cfg.WANDB.ENTITY = args.wandb_entity
+        if args.wandb_name:
+            cfg.WANDB.NAME = args.wandb_name
+        if args.wandb_tags:
+            cfg.WANDB.TAGS = args.wandb_tags
+        if args.wandb_notes:
+            cfg.WANDB.NOTES = args.wandb_notes
 
     cfg.START_TIME = datetime.datetime.strftime(datetime.datetime.now(), '%m-%d %H:%M:%S')
     default_setup(cfg, args)

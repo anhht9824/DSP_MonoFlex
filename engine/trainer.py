@@ -15,6 +15,12 @@ from utils.metric_logger import MetricLogger
 from utils.comm import get_world_size
 from torch.nn.utils import clip_grad_norm_
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 def reduce_loss_dict(loss_dict):
 	"""
 	Reduce the loss dictionary from all processes so that process with rank
@@ -140,6 +146,29 @@ def do_train(
 			writer.add_scalars('train_metric/depth_errors', depth_errors_dict, iteration)
 			writer.add_scalar('stat/lr', optimizer.param_groups[0]["lr"], iteration)  # save learning rate
 
+			# Log to wandb if enabled
+			if cfg.WANDB.ENABLED and WANDB_AVAILABLE:
+				wandb_log_dict = {
+					'train/learning_rate': optimizer.param_groups[0]["lr"],
+					'train/iteration': iteration,
+				}
+				
+				# Add depth errors to wandb
+				for key, value in depth_errors_dict.items():
+					wandb_log_dict[f'train/depth_errors/{key}'] = value
+				
+				# Add other metrics to wandb
+				for name, meter in meters.meters.items():
+					if name.find('MAE') >= 0: 
+						continue  # already added above
+					if name in ['time', 'data']: 
+						wandb_log_dict[f"train/stat/{name}"] = meter.value
+					else: 
+						wandb_log_dict[f"train/metric/{name}"] = meter.value
+				
+				if iteration % cfg.WANDB.LOG_INTERVAL == 0:
+					wandb.log(wandb_log_dict, step=iteration)
+
 			for name, meter in meters.meters.items():
 				if name.find('MAE') >= 0: continue
 				if name in ['time', 'data']: writer.add_scalar("stat/{}".format(name), meter.value, iteration)
@@ -183,14 +212,29 @@ def do_train(
 				# only record more accurate R40 results
 				result_dict = result_dict[0]
 				if len(result_dict) > 0:
+					wandb_eval_dict = {}
 					for key, value in result_dict.items():
 						for metric in record_metrics:
 							if key.find(metric) >= 0:
 								threshold = key[len(metric) : len(metric) + 4]
 								writer.add_scalar("eval_{}_{}/{}".format(default_depth_method, threshold, key), float(value), eval_iteration + 1)
+								
+								# Log to wandb
+								if cfg.WANDB.ENABLED and WANDB_AVAILABLE:
+									wandb_eval_dict[f"eval_{default_depth_method}_{threshold}/{key}"] = float(value)
 
+				# Log IoUs to wandb
+				wandb_iou_dict = {}
 				for key, value in dis_ious.items():
-					writer.add_scalar("IoUs_{}/{}".format(key, default_depth_method), value, eval_iteration + 1)				
+					writer.add_scalar("IoUs_{}/{}".format(key, default_depth_method), value, eval_iteration + 1)
+					if cfg.WANDB.ENABLED and WANDB_AVAILABLE:
+						wandb_iou_dict[f"eval/IoUs_{key}/{default_depth_method}"] = value
+				
+				# Log all evaluation metrics to wandb
+				if cfg.WANDB.ENABLED and WANDB_AVAILABLE:
+					wandb_eval_dict.update(wandb_iou_dict)
+					wandb_eval_dict['eval/iteration'] = eval_iteration + 1
+					wandb.log(wandb_eval_dict, step=iteration)				
 
 				# record the best model according to the AP_3D, Car, Moderate, IoU=0.7
 				important_key = '{}_3d_{:.2f}/moderate'.format('Car', 0.7)
@@ -201,6 +245,13 @@ def do_train(
 					best_iteration = iteration
 					best_result_str = result_str
 					checkpointer.save("model_moderate_best_{}".format(default_depth_method), **arguments)
+
+					# Log best model to wandb
+					if cfg.WANDB.ENABLED and WANDB_AVAILABLE:
+						wandb.log({
+							'eval/best_mAP': best_mAP,
+							'eval/best_iteration': best_iteration,
+						}, step=iteration)
 
 					if cfg.SOLVER.EVAL_AND_SAVE_EPOCH:
 						logger.info('epoch = {}, best_mAP = {:.2f}, updating best checkpoint for depth {} \n'.format(cur_epoch, eval_mAP, default_depth_method))
